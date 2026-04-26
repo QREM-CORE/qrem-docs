@@ -1,0 +1,101 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs} % For formal tables
+\usepackage{hyperref} % For clickable links
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{QREM Core: A Highly-Efficient Hardware Architecture for the ML-KEM PQC Standard\\
+% {\footnotesize \textsuperscript{*}Note: Sub-titles are not captured in Xplore and
+% should not be used}
+}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Kiet Le}
+\IEEEauthorblockA{\textit{Lassonde School of Engineering} \\
+\textit{York University}\\
+Toronto, Ontario, Canada \\
+kietle@my.yorku.ca}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Team Member 2}
+\IEEEauthorblockA{\textit{Lassonde School of Engineering} \\
+\textit{York University}\\
+Toronto, Ontario, Canada \\
+email@my.yorku.ca}
+\and
+\IEEEauthorblockN{3\textsuperscript{rd} Team Member 3}
+\IEEEauthorblockA{\textit{Lassonde School of Engineering} \\
+\textit{York University}\\
+Toronto, Ontario, Canada \\
+email@my.yorku.ca}
+% Add more authors as needed
+}
+
+\maketitle
+
+\begin{abstract}
+The rapid advancement of quantum computing threatens the security of classical public-key cryptography. In response, NIST standardized the Module-Lattice-Based Key-Encapsulation Mechanism (ML-KEM) under FIPS 203. This paper presents the QREM Core, a highly efficient, cycle-accurate hardware accelerator for ML-KEM. Our architecture features a dedicated Polynomial Arithmetic Unit (PAU) optimized for 12x12-bit modular multiplication, a high-throughput Hash Sampler Unit (HSU) for FIPS 202 Keccak functions, and a deterministic 4-bank polynomial memory subsystem. By strategically decoupling fixed-point compression into a dedicated Transcoder Unit, we eliminate combinational area bloat, achieving a highly optimized ASIC and FPGA footprint. The fully integrated system is verified against a custom Python Golden Model and standard NIST Known Answer Tests (KATs).
+\end{abstract}
+
+\begin{IEEEkeywords}
+Post-Quantum Cryptography (PQC), ML-KEM, FIPS 203, Hardware Accelerator, ASIC, FPGA, Number Theoretic Transform (NTT)
+\end{IEEEkeywords}
+
+\section{Introduction}
+% Introduce the problem: Quantum threat, Shor's algorithm, NIST standardization.
+% Introduce the solution: Hardware acceleration of ML-KEM.
+% Briefly outline the contributions of this paper.
+
+\section{Background}
+\subsection{Module-Lattice-Based Cryptography}
+% Mathematical foundation of ML-KEM (R_q, module dimension k).
+
+\subsection{The FIPS 203 Standard}
+% KeyGen, Encapsulation, Decapsulation processes.
+
+\section{System Architecture}
+% High-level block diagram explanation.
+The QREM Core architecture is partitioned into several independent datapaths communicating via AXI4-Stream interfaces...
+
+\subsection{Polynomial Arithmetic Unit (PAU)}
+% NTT/INTT butterfly operations and modular reduction.
+
+\subsection{Hash Sampler Unit (HSU)}
+% SHA3-256, SHA3-512, SHAKE128/256 for seed expansion and CBD sampling.
+
+\subsection{Transcoder Unit}
+% ByteEncode/Decode and 12x24-bit fixed-point Compression math.
+
+\subsection{Poly-Mem Subsystem}
+% 4-bank SRAM memory routing, arbitration (PAU > HSU > Transcoder).
+
+\section{Verification Methodology}
+% Describe the TAID methodology, Python Golden Model, Verilator regression, and Yosys Scatter-Gather pipeline.
+
+\section{Implementation Results}
+\subsection{Area and Resource Utilization}
+% FPGA (LUTs, DSPs, BRAMs) and ASIC (Gate Equivalents) results.
+
+\subsection{Performance and Throughput}
+% Latency cycles and F_max.
+
+\section{Conclusion}
+% Summarize the achievements and future work.
+
+\section*{Acknowledgment}
+% Thank supervisors, Lassonde Hardware Design Club members, or organizations that supported the capstone.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references} % Requires a references.bib file
+
+\end{document}
