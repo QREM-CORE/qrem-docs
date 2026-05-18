@@ -1,36 +1,45 @@
-# [Module Name] Datapath & Microarchitecture
+# Hash Sampler Unit (HSU) Datapath & Microarchitecture
 
 ## 1. Overview
-*Provide a 1-2 sentence summary of the physical datapath. What is the core arithmetic or logical operation happening here?*
-**Example:** The PAU datapath consists of a deeply pipelined Cooley-Tukey butterfly unit featuring parallel 12x12-bit DSP multipliers and a custom Montgomery reduction stage.
+The HSU datapath routes input data (seeds or packed polynomials) through an input multiplexer into a high-performance, 1-cycle-per-round Keccak core. The Keccak squeeze stream is then demultiplexed into specialized samplers (NTT Rejection or CBD) or routed directly to memory for bypass hashing.
 
 ## 2. Block Diagram
-*Use Mermaid.js to create a high-level flowchart of the datapath from `s_axis_tdata` to `m_axis_tdata`. This helps AI agents understand the topology.*
-
 ```mermaid
 graph TD
-    A[Input Registers] --> B[Multiplier Array]
-    B --> C[Modular Reduction]
-    C --> D[Accumulator]
-    D --> E[Output Registers]
+    subgraph Input Stage
+        SEED_IN[Seed Memory] --> IN_MUX{Input Mux}
+        P_PACK[coeff_to_axis_packer] --> IN_MUX
+        RAW_AXI[Raw AXI-S] --> IN_MUX
+    end
+
+    IN_MUX -- axis_t_data --> KCORE[Keccak FIPS-202 Core]
+
+    subgraph Output Stage
+        KCORE -- 64-bit Stream --> OUT_DMUX{Output Demux}
+        OUT_DMUX -- SHAKE128 --> NTT[Sample NTT]
+        OUT_DMUX -- SHAKE256 --> CBD[Sample CBD]
+        OUT_DMUX -- Bypass --> SEED_OUT[Seed Memory]
+    end
+
+    NTT --> P_WR[Poly Memory Writer]
+    CBD --> P_WR
 ```
 
 ## 3. Pipeline Stages
-*Break down the datapath cycle-by-cycle. This is critical for timing closure and understanding latency.*
-
-| Stage | Logic / Operation | Registers Used |
+| Stage | Logic / Operation | Key Submodules |
 | :--- | :--- | :--- |
-| **IF (Stage 0)** | Fetch coefficients from AXI-Stream. | `coef_a_q`, `coef_b_q` |
-| **EX1 (Stage 1)** | 12x12-bit multiplication. | `mult_res_q` |
-| **EX2 (Stage 2)** | Modular reduction ($q = 3329$). | `reduce_res_q` |
-| **WB (Stage 3)** | Format and drive to memory/output. | `out_data_q` |
+| **IF (Input Fetch)** | Fetch inputs. If `input_sel_i=1`, packer gearboxes 12-bit coeffs into 8-byte aligned blocks. | `coeff_to_axis_packer` |
+| **PERM (Permutation)** | Keccak core absorbs input and squeezes 64-bit pseudo-random beats. | `keccak_core` |
+| **SAMP (Sampling)** | Perform NTT Rejection (Alg 7) or CBD (Alg 8) on the Keccak stream. | `sample_ntt`, `sample_cbd` |
+| **WB (Writeback)** | Zero-pad sampler outputs (48-bit to 64-bit) or route bypass hashes to RAM. | `hash_sampler_unit` (Routing) |
 
 ## 4. Critical Path Analysis
-*Identify the longest combinational logic path in this module. This tells the synthesis tools (and future engineers) where $F_{max}$ bottlenecks will likely occur.*
-* **Start Point:** [e.g., `mult_res_q` register]
-* **End Point:** [e.g., `reduce_res_q` register]
-* **Logic Traversed:** [e.g., 24-bit carry-lookahead adder and multiplexer tree.]
+* **Start Point:** `keccak_core` state registers.
+* **End Point:** `keccak_core` state registers / Sampler output registers.
+* **Logic Traversed:** The 1-cycle Keccak permutation core represents the deepest logic path in the unit, requiring 24 rounds of $\chi, \theta, \rho, \pi, \iota$ transformations depending on synthesis optimizations.
+* *Note:* Secondary bottleneck exists in the `sample_ntt` rejection loop checking if 12-bit chunks are $< q$ (3329).
 
 ## 5. Hardware Constraints & Area Trade-offs
-*Document any specific design decisions made to save Area, Power, or Timing.*
-* [e.g., "We time-multiplexed the Keccak core to reuse the permutation logic for both SHA3 and SHAKE, saving roughly 40K Gate Equivalents at the cost of throughput."]
+* **Resource Sharing:** A single Keccak core is heavily time-multiplexed for all ML-KEM hash functions ($G, H, J, PRF$) to save massive area (~40K+ gates).
+* **Gearbox Throttling:** `coeff_to_axis_packer` prevents read duplication via `rd_pending_q`, enforcing strict 8-byte FIPS-203 alignment. This trades 1 cycle of initial read latency for robust alignment without internal FIFOs.
+* **Zero Padding:** Poly Sampler outputs are strictly 48-bit wide (four 12-bit coefficients). The top-level HSU routes them onto a standard 64-bit datapath by tying the upper 16 bits to zero, ensuring clean memory writes.
