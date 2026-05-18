@@ -1,49 +1,39 @@
-# [Module Name] FSM: [State Machine Name]
+# Hash Sampler Unit: Packer FSM (`coeff_to_axis_packer`)
 
 ## 1. Overview
-*Provide a 1-2 sentence summary of what this specific state machine controls.*
-**Example:** The Main Orchestration FSM controls the high-level sequencing of the Key Generation phase, coordinating the Hash Sampler Unit (HSU) for seed expansion and the Polynomial Arithmetic Unit (PAU) for NTT transformations.
+The top-level Hash Sampler Unit (HSU) routes data combinationally and tracks completion via a simple `done_r` sticky bit, avoiding a complex top-level FSM. However, the `coeff_to_axis_packer` submodule contains a critical state machine. This FSM orchestrates reading 12-bit polynomial coefficients from memory, packing them into 8-byte (64-bit) AXI-Stream beats, and handling end-of-polynomial flushes to satisfy FIPS-203 ByteEncode alignment requirements during multi-phase absorption.
 
 ## 2. State Diagram
-*Use Mermaid.js to define the state flow. This renders visually on GitHub and provides perfect topological context for AI agents.*
-
 ```mermaid
 stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> WAIT_SEED : start_i
-    WAIT_SEED --> HASH_EXPAND : seed_valid_i
-    HASH_EXPAND --> NTT_TRANSFORM : hsu_done
-    NTT_TRANSFORM --> IDLE : pau_done
+    [*] --> S_IDLE
+    S_IDLE --> S_READ : start_i
+    S_READ --> S_FLUSH : rd_idx_q == 63 & hsu_rd_valid_i
+    S_FLUSH --> S_IDLE : axis_t_ready_i (Final beat accepted)
 ```
 
 ## 3. State Definitions
-*Define what actually happens inside each state. Keep descriptions focused on datapath control and memory routing.*
-
-| State Name | Encodings (Optional) | Description & Key Actions |
+| State Name | Encodings | Description & Key Actions |
 | :--- | :--- | :--- |
-| `IDLE` | `3'b000` | Default reset state. Awaits the `start_i` trigger. Datapath is gated. |
-| `WAIT_SEED` | `3'b001` | Asserts `m_axis_tready` to the seed FIFO and waits for `tvalid`. |
-| `HASH_EXPAND` | `3'b010` | Triggers the Keccak core. Routes Keccak outputs to Poly-Mem Bank 0. |
+| `S_IDLE` | `2'b00` | Default reset state. Clears gearbox buffer and `packer_done_o`. Awaits `start_i` trigger. |
+| `S_READ` | `2'b01` | Main packing state. Fetches 4x 12-bit coefficients (48 bits) per memory read. Buffers them into a 128-bit gearbox. Whenever the gearbox holds $\ge$ 8 bytes, it asserts `axis_t_valid_o` to push 64 bits to Keccak. |
+| `S_FLUSH` | `2'b10` | Triggered on the final polynomial index (63). Flushes any remaining bytes in the gearbox to Keccak. Calculates a partial `axis_t_keep_o` mask if the remaining byte count is not a multiple of 8. |
 
 ## 4. Transition Conditions
-*Explicitly map the exact signals required to jump between states. This helps during waveform debugging when an FSM gets "stuck."*
-
 | Current State | Condition (Signal) | Next State | Notes |
 | :--- | :--- | :--- | :--- |
-| `IDLE` | `start_i == 1'b1` | `WAIT_SEED` | - |
-| `WAIT_SEED` | `s_axis_tvalid == 1'b1` | `HASH_EXPAND` | Latches the seed into the internal register. |
-| `HASH_EXPAND` | `hsu_done_i == 1'b1` | `NTT_TRANSFORM` | - |
+| `S_IDLE` | `start_i == 1'b1` | `S_READ` | Initializes `rd_idx_q` to 0. |
+| `S_READ` | `rd_idx_q == 63` && `hsu_rd_valid_i == 1'b1` | `S_FLUSH` | 63 is the final index for a 256-coeff polynomial read 4 at a time ($256/4 - 1$). |
+| `S_FLUSH`| `axis_t_ready_i == 1'b1` (and buffer empty) | `S_IDLE` | Returns to IDLE and pulses `packer_done_o`. |
 
 ## 5. Control Outputs (Moore/Mealy)
-*List the critical control signals driven by this FSM. Specify if the output is Moore (depends only on state) or Mealy (depends on state + inputs).*
-
 | Output Signal | Type | Active State(s) | Description |
 | :--- | :--- | :--- | :--- |
-| `hsu_start_o` | Moore | `HASH_EXPAND` | 1-cycle pulse to wake up the Hash Sampler Unit. |
-| `mem_we_o` | Mealy | `NTT_TRANSFORM` | Asserted only when `pau_valid_i` is high during the NTT state. |
+| `hsu_rd_req_o` | Moore | `S_READ` | Memory read request. Throttled by `rd_pending_q` to prevent duplicate reads while waiting for `hsu_rd_valid_i`. |
+| `axis_t_valid_o` | Moore | `S_READ`, `S_FLUSH`| High when gearbox has $\ge$ 8 bytes, OR during `S_FLUSH` if any bytes remain. |
+| `axis_t_keep_o` | Moore | `S_FLUSH` | Byte enable mask. `8'hFF` during `S_READ`. Calculated dynamically in `S_FLUSH` based on remaining `fill_count`. |
+| `packer_done_o` | Moore | `S_IDLE` | High in IDLE state *after* an operation has completed. |
 
 ## 6. Latency & Stall Conditions
-*Note any expected cycle counts or potential deadlocks.*
-
-* **Expected Execution Time:** [e.g., 256 cycles for the `NTT_TRANSFORM` state, assuming no memory stalls.]
-* **Stall Behavior:** [e.g., If `mem_stall_i` asserts during `HASH_EXPAND`, the FSM freezes the Keccak pipeline registers until the stall clears.]
+* **Throttled Reads:** Because the Poly Memory Reader is pipelined, the FSM uses a `rd_pending_q` flag. Once a read is requested, the FSM drops `hsu_rd_req_o` and waits for `hsu_rd_valid_i` before advancing indices. This prevents address duplication.
+* **Gearbox Backpressure:** If the Keccak core stalls (`axis_t_ready_i == 0`), the gearbox will continue to accumulate incoming memory data up to 128 bits. If it approaches overflow ($>12$ bytes), it halts `hsu_rd_req_o` until Keccak consumes a beat.
